@@ -1,76 +1,159 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>ComfyUI Web Prompt with Progress</title>
+  <title>ComfyUI Web</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 15px;
+      background-color: #f7f7f7;
+      color: #333;
+      box-sizing: border-box;
+    }
+    .container {
+      width: 100%;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    h2 {
+      color: #111;
+    }
+    #prompt {
+      width: 100%;
+      height: 120px;
+      font-size: 16px;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      resize: vertical;
+      box-sizing: border-box;
+      margin-bottom: 10px;
+    }
+    #generate-btn, #save-btn {
+      padding: 12px 20px;
+      font-size: 16px;
+      width: 100%;
+      margin-top: 10px;
+      border: none;
+      border-radius: 8px;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    #generate-btn {
+      background-color: #007bff;
+    }
+    #generate-btn:disabled {
+      background-color: #a0a0a0;
+    }
+    #save-btn {
+      background-color: #28a745;
+    }
+    #generating-text {
+      display: none;
+      margin-top: 10px;
+      color: #555;
+      text-align: center;
+    }
     .progress-container {
-      width: 1000px; /* Match textarea width */
+      width: 100%;
       margin: 20px 0;
     }
     .progress-bar {
       width: 100%;
       height: 20px;
-      background-color: #f0f0f0;
+      background-color: #e9ecef;
       border-radius: 10px;
       overflow: hidden;
     }
     .progress-fill {
       height: 100%;
-      background-color: #4caf50;
+      background-color: #007bff;
       width: 0%;
       transition: width 0.3s ease-in-out;
-      transform: translateZ(0); /* Force hardware acceleration */
     }
     .progress-text {
       margin-top: 5px;
-      font-family: Arial, sans-serif;
+      text-align: center;
     }
-    #prompt {
-      width: 1000px; /* Tripled from 500px */
-      height: 100px; /* Tripled from 40px */
-      font-size: 16px;
+    #result {
+      width: 100%;
+      margin-top: 20px;
+      border-radius: 8px;
+    }
+    #logs {
+      display: none;
+      height: 300px;
+      width: 100%;
+      overflow-y: scroll;
+      border: 1px solid #ccc;
       padding: 10px;
-      border-radius: 5px;
-      resize: vertical;
-      font-family: Arial, sans-serif;
+      background-color: #fff;
+      margin-top: 20px;
+      box-sizing: border-box;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      border-radius: 8px;
+      font-family: monospace;
     }
-    #generate-btn, #save-btn {
-      padding: 10px 20px;
-      font-size: 16px;
-    }
-    #generating-text {
-      margin-left: 10px;
-      font-family: Arial, sans-serif;
-      color: #555;
-      display: none; /* Hidden by default */
+
+    /* Desktop styles */
+    @media (min-width: 768px) {
+      #generate-btn, #save-btn {
+        width: auto;
+        display: inline-block !important;
+      }
+      .button-group {
+        display: flex;
+        gap: 10px;
+      }
     }
   </style>
 </head>
 <body>
-  <h2>Enter your prompt</h2>
-  <textarea id="prompt" placeholder="Describe your image"></textarea>
-  <button id="generate-btn" onclick="generate()">Generate</button>
-  <button id="save-btn" onclick="saveToDrive()" style="display: none;">Save to Google Drive</button>
-  <span id="generating-text">Generating, ~60 Sec</span>
-  <br><br>
-  <div class="progress-container">
-    <div class="progress-bar">
-      <div class="progress-fill" id="progress-fill"></div>
+  <div class="container">
+    <h2>ComfyUI Web HarunaAoba</h2>
+    <p>Enter your prompt to generate an image.</p>
+    <textarea id="prompt" placeholder="e.g., a beautiful landscape painting, trending on artstation"></textarea>
+    <div class="button-group">
+      <button id="generate-btn" onclick="generate()">Generate</button>
+      <button id="save-btn" onclick="saveToDrive()" style="display: none;">Save to Google Drive</button>
     </div>
-    <div class="progress-text" id="progress-text">Progress: 0%</div>
+    <span id="generating-text">Generating, please wait...</span>
+    
+    <div class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <div class="progress-text" id="progress-text">Progress: 0%</div>
+    </div>
+    
+    <img id="result" alt="Generated Image">
+
+    <h3 style="display: none;">Logs</h3>
+    <pre id="logs"></pre>
   </div>
-  <img id="result" style="max-width:1000px;">
-  
+
   <script>
     let ws = null;
     let promptId = null;
 
     function connectWebSocket() {
-      ws = new WebSocket("ws://" + window.location.host + "/ws");
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(protocol + '//' + window.location.host + '/ws');
+      
       ws.onopen = function() {
         console.log("WebSocket connected");
+        document.getElementById("logs").textContent += "WebSocket connected\n";
       };
+
       ws.onmessage = function(event) {
+        const logs = document.getElementById("logs");
+        logs.textContent += event.data + "\n";
+        logs.scrollTop = logs.scrollHeight;
+
         try {
           const message = JSON.parse(event.data);
           if (message.type === "progress") {
@@ -82,15 +165,19 @@
             document.getElementById("progress-text").textContent = "Processing complete!";
           }
         } catch (e) {
-          console.error("WebSocket message error:", e);
+          // Not a JSON message, just a log line.
         }
       };
+
       ws.onclose = function() {
         console.log("WebSocket closed, reconnecting...");
+        document.getElementById("logs").textContent += "WebSocket closed, reconnecting...\n";
         setTimeout(connectWebSocket, 2000);
       };
+
       ws.onerror = function(error) {
         console.error("WebSocket error:", error);
+        document.getElementById("logs").textContent += "WebSocket error. See console for details.\n";
       };
     }
 
@@ -100,12 +187,12 @@
         return;
       }
       try {
-        let res = await fetch(`/save_to_drive/${promptId}`, { method: "POST" });
+        const res = await fetch(`/save_to_drive/${promptId}`, { method: "POST" });
         if (res.ok) {
-          let data = await res.json();
+          const data = await res.json();
           alert("Image saved to Google Drive! File ID: " + data.file_id);
         } else {
-          let errorText = await res.text();
+          const errorText = await res.text();
           alert("Failed to save to Google Drive: " + errorText);
         }
       } catch (e) {
@@ -114,59 +201,57 @@
     }
 
     async function generate() {
+      const generateBtn = document.getElementById("generate-btn");
+      const generatingText = document.getElementById("generating-text");
+      
       try {
-        // Disable button and show generating text
-        const generateBtn = document.getElementById("generate-btn");
-        const generatingText = document.getElementById("generating-text");
         generateBtn.disabled = true;
-        generatingText.style.display = "inline";
+        generatingText.style.display = "block";
 
-        // Reset progress bar and image
         document.getElementById("progress-fill").style.width = "0%";
         document.getElementById("progress-text").textContent = "Progress: 0%";
         document.getElementById("result").src = "";
-        document.getElementById("save-btn").style.display = "none"; // Hide save button
+        document.getElementById("result").style.display = "none";
+        document.getElementById("save-btn").style.display = "none";
+        document.getElementById("logs").textContent = "";
 
-        let prompt = document.getElementById("prompt").value;
-        let res = await fetch("/generate", {
+        const prompt = document.getElementById("prompt").value;
+        const res = await fetch("/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt })
         });
+
         if (!res.ok) {
-          let errorText = await res.text();
-          alert("Generation failed: " + errorText + " (Status: " + res.status + ")");
-          generateBtn.disabled = false;
-          generatingText.style.display = "none";
+          const errorText = await res.text();
+          alert(`Generation failed: ${errorText} (Status: ${res.status})`);
           return;
         }
-        let data = await res.json();
+
+        const data = await res.json();
         promptId = data.prompt_id;
         console.log("Prompt ID:", promptId);
         connectWebSocket();
 
-        // Fetch the image
-        let imageRes = await fetch(`/get_image/${data.prompt_id}`);
+        const imageRes = await fetch(`/get_image/${data.prompt_id}`);
         if (!imageRes.ok) {
-          let errorText = await imageRes.text();
+          const errorText = await imageRes.text();
           console.error("Image retrieval failed:", errorText);
           alert("Image retrieval failed: " + errorText);
-          generateBtn.disabled = false;
-          generatingText.style.display = "none";
           return;
         }
-        let blob = await imageRes.blob();
-        document.getElementById("result").src = URL.createObjectURL(blob);
-        document.getElementById("save-btn").style.display = "inline"; // Show save button
 
-        // Re-enable button and hide generating text
-        generateBtn.disabled = false;
-        generatingText.style.display = "none";
+        const blob = await imageRes.blob();
+        document.getElementById("result").src = URL.createObjectURL(blob);
+        document.getElementById("result").style.display = "block";
+        document.getElementById("save-btn").style.display = "inline-block";
+
       } catch (e) {
         console.error("Generate error:", e);
         alert("Failed to generate image: " + e.message);
-        document.getElementById("generate-btn").disabled = false;
-        document.getElementById("generating-text").style.display = "none";
+      } finally {
+        generateBtn.disabled = false;
+        generatingText.style.display = "none";
       }
     }
   </script>
