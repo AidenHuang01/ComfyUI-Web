@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ComfyUI Web Prompt with Progress</title>
+  <style>
+    .progress-container {
+      width: 1000px; /* Match textarea width */
+      margin: 20px 0;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 20px;
+      background-color: #f0f0f0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background-color: #4caf50;
+      width: 0%;
+      transition: width 0.3s ease-in-out;
+    }
+    .progress-text {
+      margin-top: 5px;
+      font-family: Arial, sans-serif;
+    }
+    #prompt {
+      width: 1000px; /* Tripled from 500px */
+      height: 100px; /* Tripled from 40px */
+      font-size: 16px;
+      padding: 10px;
+      border-radius: 5px;
+      resize: vertical;
+      font-family: Arial, sans-serif;
+    }
+    #generate-btn {
+      padding: 10px 20px;
+      font-size: 16px;
+    }
+    #generating-text {
+      margin-left: 10px;
+      font-family: Arial, sans-serif;
+      color: #555;
+      display: none; /* Hidden by default */
+    }
+  </style>
+</head>
+<body>
+  <h2>Enter your prompt</h2>
+  <textarea id="prompt" placeholder="Describe your image"></textarea>
+  <button id="generate-btn" onclick="generate()">Generate</button>
+  <span id="generating-text">Generating, ~60 Sec</span>
+  <br><br>
+  <div class="progress-container">
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+    <div class="progress-text" id="progress-text">Progress: 0%</div>
+  </div>
+  <img id="result" style="max-width:1000px;">
+  
+  <script>
+    let ws = null;
+    let promptId = null;
+
+    function connectWebSocket() {
+      ws = new WebSocket("ws://" + window.location.host + "/ws");
+      ws.onopen = function() {
+        console.log("WebSocket connected");
+      };
+      ws.onmessage = function(event) {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === "progress" && message.data.prompt_id === promptId) {
+            const { value, max } = message.data;
+            const percentage = Math.round((value / max) * 100);
+            document.getElementById("progress-fill").style.width = `${percentage}%`;
+            document.getElementById("progress-text").textContent = `Progress: ${percentage}%`;
+          } else if (message.type === "executed" && message.data.prompt_id === promptId) {
+            document.getElementById("progress-text").textContent = "Processing complete!";
+          }
+        } catch (e) {
+          console.error("WebSocket message error:", e);
+        }
+      };
+      ws.onclose = function() {
+        console.log("WebSocket closed, reconnecting...");
+        setTimeout(connectWebSocket, 2000);
+      };
+      ws.onerror = function(error) {
+        console.error("WebSocket error:", error);
+      };
+    }
+
+    async function generate() {
+      try {
+        // Disable button and show generating text
+        const generateBtn = document.getElementById("generate-btn");
+        const generatingText = document.getElementById("generating-text");
+        generateBtn.disabled = true;
+        generatingText.style.display = "inline";
+
+        // Reset progress bar and image
+        document.getElementById("progress-fill").style.width = "0%";
+        document.getElementById("progress-text").textContent = "Progress: 0%";
+        document.getElementById("result").src = "";
+
+        let prompt = document.getElementById("prompt").value;
+        let res = await fetch("/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt })
+        });
+        if (!res.ok) {
+          let errorText = await res.text();
+          alert("Generation failed: " + errorText + " (Status: " + res.status + ")");
+          generateBtn.disabled = false;
+          generatingText.style.display = "none";
+          return;
+        }
+        let data = await res.json();
+        promptId = data.prompt_id;
+        console.log("Prompt ID:", promptId);
+        connectWebSocket();
+
+        // Fetch the image
+        let imageRes = await fetch(`/get_image/${data.prompt_id}`);
+        if (!imageRes.ok) {
+          let errorText = await imageRes.text();
+          console.error("Image retrieval failed:", errorText);
+          alert("Image retrieval failed: " + errorText);
+          generateBtn.disabled = false;
+          generatingText.style.display = "none";
+          return;
+        }
+        let blob = await imageRes.blob();
+        document.getElementById("result").src = URL.createObjectURL(blob);
+        // Re-enable button and hide generating text
+        generateBtn.disabled = false;
+        generatingText.style.display = "none";
+      } catch (e) {
+        console.error("Generate error:", e);
+        alert("Failed to generate image: " + e.message);
+        document.getElementById("generate-btn").disabled = false;
+        document.getElementById("generating-text").style.display = "none";
+      }
+    }
+  </script>
+</body>
+</html>
