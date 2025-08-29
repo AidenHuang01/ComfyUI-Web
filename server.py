@@ -7,6 +7,11 @@ import os
 import websocket
 import threading
 import queue
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -26,6 +31,8 @@ def ws_comfyui_client():
             ws.connect(COMFY_WS)
             while True:
                 message = ws.recv()
+                if isinstance(message, bytes):
+                    message = message.decode('utf-8', 'ignore')
                 message_queue.put(message)
         except Exception as e:
             print(f"ComfyUI WebSocket error: {e}, reconnecting...")
@@ -109,6 +116,79 @@ def websocket_route(ws):
         except Exception as e:
             print(f"WebSocket proxy error: {e}")
             break
+
+# --- Google Drive Integration ---
+# If modifying these scopes, delete the file token.json.
+SCOPES = ['https://www.googleapis.com/auth/drive']
+
+def authenticate():
+    creds = None
+    # The file token.json stores the user's access and refresh tokens, and is
+    # created automatically when the authorization flow completes for the first time.
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    
+    # If there are no (valid) credentials available, let the user log in.
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        
+        # Save the credentials for the next run
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+            
+    return creds
+
+def upload_to_google_drive(file_path, file_name):
+    """Uploads a file to the specified Google Drive folder."""
+    creds = authenticate()
+    service = build('drive', 'v3', credentials=creds)
+
+    file_metadata = {
+        'name' : file_name
+    }
+
+    # Use MediaFileUpload to handle the file content
+    media = MediaFileUpload(file_path, mimetype='image/png')
+    
+    file = service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id'
+    ).execute()
+
+    return file.get("id")
+
+
+@app.route("/save_to_drive/<prompt_id>", methods=["POST"])
+def save_to_drive(prompt_id):
+    try:
+        # Find the image file associated with the prompt_id
+        history = requests.get(f"{COMFY_API}/history/{prompt_id}").json()
+        outputs = history.get(prompt_id, {}).get("outputs", {})
+        image_saver_output = outputs.get("400", {})
+        if "images" not in image_saver_output:
+            return {"error": "Image not found for this prompt_id"}, 404
+
+        file_name = image_saver_output["images"][0]["filename"]
+        file_path = os.path.join(OUTPUT_DIR, file_name)
+
+        if not os.path.exists(file_path):
+            return {"error": "Image file not found on server"}, 404
+
+        # Upload the file to Google Drive
+        file_id = upload_to_google_drive(file_path, file_name)
+        if file_id:
+            return jsonify({"file_id": file_id})
+        else:
+            return {"error": "Failed to get file_id from Google Drive"}, 500
+
+    except Exception as e:
+        return {"error": str(e)}, 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

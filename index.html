@@ -19,6 +19,7 @@
       background-color: #4caf50;
       width: 0%;
       transition: width 0.3s ease-in-out;
+      transform: translateZ(0); /* Force hardware acceleration */
     }
     .progress-text {
       margin-top: 5px;
@@ -33,7 +34,7 @@
       resize: vertical;
       font-family: Arial, sans-serif;
     }
-    #generate-btn {
+    #generate-btn, #save-btn {
       padding: 10px 20px;
       font-size: 16px;
     }
@@ -49,6 +50,7 @@
   <h2>Enter your prompt</h2>
   <textarea id="prompt" placeholder="Describe your image"></textarea>
   <button id="generate-btn" onclick="generate()">Generate</button>
+  <button id="save-btn" onclick="saveToDrive()" style="display: none;">Save to Google Drive</button>
   <span id="generating-text">Generating, ~60 Sec</span>
   <br><br>
   <div class="progress-container">
@@ -71,7 +73,7 @@
       ws.onmessage = function(event) {
         try {
           const message = JSON.parse(event.data);
-          if (message.type === "progress" && message.data.prompt_id === promptId) {
+          if (message.type === "progress") {
             const { value, max } = message.data;
             const percentage = Math.round((value / max) * 100);
             document.getElementById("progress-fill").style.width = `${percentage}%`;
@@ -92,6 +94,25 @@
       };
     }
 
+    async function saveToDrive() {
+      if (!promptId) {
+        alert("No image to save!");
+        return;
+      }
+      try {
+        let res = await fetch(`/save_to_drive/${promptId}`, { method: "POST" });
+        if (res.ok) {
+          let data = await res.json();
+          alert("Image saved to Google Drive! File ID: " + data.file_id);
+        } else {
+          let errorText = await res.text();
+          alert("Failed to save to Google Drive: " + errorText);
+        }
+      } catch (e) {
+        alert("Error saving to Google Drive: " + e.message);
+      }
+    }
+
     async function generate() {
       try {
         // Disable button and show generating text
@@ -104,6 +125,7 @@
         document.getElementById("progress-fill").style.width = "0%";
         document.getElementById("progress-text").textContent = "Progress: 0%";
         document.getElementById("result").src = "";
+        document.getElementById("save-btn").style.display = "none"; // Hide save button
 
         let prompt = document.getElementById("prompt").value;
         let res = await fetch("/generate", {
@@ -135,6 +157,8 @@
         }
         let blob = await imageRes.blob();
         document.getElementById("result").src = URL.createObjectURL(blob);
+        document.getElementById("save-btn").style.display = "inline"; // Show save button
+
         // Re-enable button and hide generating text
         generateBtn.disabled = false;
         generatingText.style.display = "none";
