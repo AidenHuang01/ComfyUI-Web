@@ -143,14 +143,16 @@ def authenticate():
             
     return creds
 
-def upload_to_google_drive(file_path, file_name):
+def upload_to_google_drive(file_path, file_name, folder_id=None):
     """Uploads a file to the specified Google Drive folder."""
     creds = authenticate()
     service = build('drive', 'v3', credentials=creds)
 
     file_metadata = {
-        'name' : file_name
+        'name' : file_name,
     }
+    if folder_id:
+        file_metadata['parents'] = [folder_id]
 
     # Use MediaFileUpload to handle the file content
     media = MediaFileUpload(file_path, mimetype='image/png')
@@ -164,9 +166,13 @@ def upload_to_google_drive(file_path, file_name):
     return file.get("id")
 
 
+
 @app.route("/save_to_drive/<prompt_id>", methods=["POST"])
 def save_to_drive(prompt_id):
     try:
+        # Hardcode your Google Drive folder ID here
+        folder_id = "1W-M8U3lzVxLrJ3F5lZDhvvGGwhfWExuw"
+
         # Find the image file associated with the prompt_id
         history = requests.get(f"{COMFY_API}/history/{prompt_id}").json()
         outputs = history.get(prompt_id, {}).get("outputs", {})
@@ -181,7 +187,7 @@ def save_to_drive(prompt_id):
             return {"error": "Image file not found on server"}, 404
 
         # Upload the file to Google Drive
-        file_id = upload_to_google_drive(file_path, file_name)
+        file_id = upload_to_google_drive(file_path, file_name, folder_id)
         if file_id:
             return jsonify({"file_id": file_id})
         else:

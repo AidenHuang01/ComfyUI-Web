@@ -186,8 +186,18 @@
         alert("No image to save!");
         return;
       }
+      const saveBtn = document.getElementById("save-btn");
+      const originalBtnText = saveBtn.textContent;
       try {
-        const res = await fetch(`/save_to_drive/${promptId}`, { method: "POST" });
+        saveBtn.textContent = "Saving to Google Drive...";
+        saveBtn.disabled = true;
+        const res = await fetch(`/save_to_drive/${promptId}`, {
+          method: "POST",
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({})
+        });
         if (res.ok) {
           const data = await res.json();
           alert("Image saved to Google Drive! File ID: " + data.file_id);
@@ -197,6 +207,9 @@
         }
       } catch (e) {
         alert("Error saving to Google Drive: " + e.message);
+      } finally {
+        saveBtn.textContent = originalBtnText;
+        saveBtn.disabled = false;
       }
     }
 
@@ -233,18 +246,30 @@
         console.log("Prompt ID:", promptId);
         connectWebSocket();
 
-        const imageRes = await fetch(`/get_image/${data.prompt_id}`);
-        if (!imageRes.ok) {
-          const errorText = await imageRes.text();
-          console.error("Image retrieval failed:", errorText);
-          alert("Image retrieval failed: " + errorText);
-          return;
-        }
+        const imageContainer = document.getElementById("result");
+        const saveBtn = document.getElementById("save-btn");
 
-        const blob = await imageRes.blob();
-        document.getElementById("result").src = URL.createObjectURL(blob);
-        document.getElementById("result").style.display = "block";
-        document.getElementById("save-btn").style.display = "inline-block";
+        // Poll for the image
+        const pollImage = async (promptId, retries = 150, interval = 2000) => {
+          for (let i = 0; i < retries; i++) {
+            try {
+              const imageRes = await fetch(`/get_image/${promptId}`);
+              if (imageRes.ok) {
+                const blob = await imageRes.blob();
+                imageContainer.src = URL.createObjectURL(blob);
+                imageContainer.style.display = "block";
+                saveBtn.style.display = "inline-block";
+                return; // Success
+              }
+            } catch (e) {
+              console.error("Polling error:", e);
+            }
+            await new Promise(resolve => setTimeout(resolve, interval));
+          }
+          alert("Failed to retrieve image after multiple attempts.");
+        };
+
+        pollImage(promptId);
 
       } catch (e) {
         console.error("Generate error:", e);
